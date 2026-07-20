@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="sk">
 <head>
@@ -79,6 +78,17 @@
         /* Drag & Drop vizuál pri presúvaní */
         .sortable-ghost { opacity: 0.4; background-color: #d3f9d8 !important; }
         .sortable-drag { background-color: #ffffff; box-shadow: 0 4px 10px rgba(0,0,0,0.15); }
+
+        /* Zrolovateľná sekcia */
+        .collapsible-header { cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+        .collapsible-content { display: none; margin-top: 15px; }
+        .collapsible-content.open { display: block; }
+
+        /* Štýl pre úpravu členov rodiny */
+        .family-edit-city-group { margin-bottom: 15px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+        .family-edit-city-header { background: var(--building-bg); padding: 8px 12px; font-weight: bold; font-size: 0.95rem; border-bottom: 1px solid var(--border); }
+        .family-edit-sim-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-bottom: 1px solid #f0f0f0; }
+        .family-edit-sim-item:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
@@ -103,6 +113,23 @@
 
     <!-- 3. RODINY -->
     <div id="view-families" class="container">
+        <div class="form-section">
+            <h3>Vytvoriť novú rodinu</h3>
+            <div style="display: flex; gap: 10px; margin-bottom: 0;">
+                <input type="text" id="view-families-new-name" placeholder="Názov novej rodiny" style="margin-bottom: 0;">
+                <button class="btn-primary btn-small" onclick="createNewFamilyFromTab()">Vytvoriť</button>
+            </div>
+        </div>
+
+        <div id="families-edit-container" style="display: none;" class="form-section">
+            <h3 id="families-edit-title">Úprava členov rodiny</h3>
+            <div id="families-edit-members-list"></div>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button class="btn-primary" onclick="saveFamilyMembersEdit()"> Potvrdiť a uložiť zmeny</button>
+                <button class="btn-danger" onclick="cancelFamilyMembersEdit()">Zrušiť</button>
+            </div>
+        </div>
+
         <div id="families-list"></div>
     </div>
 
@@ -115,12 +142,17 @@
     <!-- 5. NASTAVENIA -->
     <div id="view-settings" class="container">
         <div class="form-section">
-            <h3>Správa miest</h3>
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <input type="text" id="new-city-name" placeholder="Názov nového mesta" style="margin-bottom: 0;">
-                <button class="btn-primary btn-small" onclick="addNewCity()">Pridať mesto</button>
+            <h3 class="collapsible-header" onclick="toggleSettingsCities()">
+                <span>Správa miest</span>
+                <span id="settings-cities-icon">▼</span>
+            </h3>
+            <div id="settings-cities-content" class="collapsible-content">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="new-city-name" placeholder="Názov nového mesta" style="margin-bottom: 0;">
+                    <button class="btn-primary btn-small" onclick="addNewCity()">Pridať mesto</button>
+                </div>
+                <div id="settings-cities-list"></div>
             </div>
-            <div id="settings-cities-list"></div>
         </div>
 
         <div class="form-section">
@@ -226,6 +258,10 @@
         let currentSimId = null;
         let currentFamilyId = null;
         let isInternalNavigation = false;
+
+        // Pomocný stav pre úpravu rodiny v záložke Rodiny
+        let editingFamilyId = null;
+        let editingFamilySimIds = new Set();
 
         // --- INICIALIZÁCIA ---
         function init() {
@@ -372,6 +408,18 @@
         }
 
         // --- SPRÁVA MIEST ---
+        function toggleSettingsCities() {
+            const content = document.getElementById('settings-cities-content');
+            const icon = document.getElementById('settings-cities-icon');
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                icon.innerText = '▼';
+            } else {
+                content.classList.add('open');
+                icon.innerText = '▲';
+            }
+        }
+
         function addNewCity() {
             const input = document.getElementById('new-city-name');
             const name = input.value.trim();
@@ -859,7 +907,126 @@
             renderSimProfile(currentSimId, false);
         }
 
-        // 5. Rodiny zoznam
+        // 5. Rodiny zoznam & Úprava rodín
+        function createNewFamilyFromTab() {
+            const input = document.getElementById('view-families-new-name');
+            const name = input.value.trim();
+            if(!name) { alert("Zadajte názov rodiny."); return; }
+
+            const newFamily = { id: generateId(), name: name };
+            state.families.push(newFamily);
+            saveData();
+            input.value = '';
+            
+            renderFamilies();
+            // Automaticky otvoriť úpravu novej rodiny
+            openFamilyMembersEdit(newFamily.id);
+        }
+
+        function openFamilyMembersEdit(familyId) {
+            const family = state.families.find(f => f.id === familyId);
+            if(!family) return;
+
+            editingFamilyId = familyId;
+            editingFamilySimIds = new Set(
+                state.sims.filter(s => s.familyIds && s.familyIds.includes(familyId)).map(s => s.id)
+            );
+
+            document.getElementById('families-edit-container').style.display = 'block';
+            document.getElementById('families-edit-title').innerText = `Spravovať členov rodiny: ${family.name}`;
+            renderFamilyMembersEditList();
+
+            // Plynulý posun k úprave
+            document.getElementById('families-edit-container').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function renderFamilyMembersEditList() {
+            const container = document.getElementById('families-edit-members-list');
+            container.innerHTML = '';
+
+            if(state.cities.length === 0) {
+                container.innerHTML = '<div class="empty-state">Žiadne mestá k dispozícii.</div>';
+                return;
+            }
+
+            state.cities.forEach(city => {
+                const citySims = state.sims.filter(s => s.city === city);
+                if(citySims.length === 0) return;
+
+                const cityGroup = document.createElement('div');
+                cityGroup.className = 'family-edit-city-group';
+
+                const header = document.createElement('div');
+                header.className = 'family-edit-city-header';
+                header.innerText = `🏙️ ${city}`;
+                cityGroup.appendChild(header);
+
+                citySims.forEach(sim => {
+                    const simRow = document.createElement('div');
+                    simRow.className = 'family-edit-sim-item';
+
+                    const isMember = editingFamilySimIds.has(sim.id);
+
+                    simRow.innerHTML = `
+                        <div>
+                            <b>${sim.name}</b> <span style="font-size: 0.85rem; color: #6c757d;">(${sim.address || 'Bez adresy'})</span>
+                        </div>
+                        <div>
+                            ${isMember 
+                                ? `<button class="btn-danger btn-small" onclick="toggleSimFamilyMembership('${sim.id}')">Odobrať z rodiny</button>`
+                                : `<button class="btn-secondary btn-small" onclick="toggleSimFamilyMembership('${sim.id}')">Pridať do rodiny</button>`
+                            }
+                        </div>
+                    `;
+                    cityGroup.appendChild(simRow);
+                });
+
+                container.appendChild(cityGroup);
+            });
+
+            if(container.children.length === 0) {
+                container.innerHTML = '<div class="empty-state">Zatiaľ neboli vytvorení žiadni simíci.</div>';
+            }
+        }
+
+        function toggleSimFamilyMembership(simId) {
+            if(editingFamilySimIds.has(simId)) {
+                editingFamilySimIds.delete(simId);
+            } else {
+                editingFamilySimIds.add(simId);
+            }
+            renderFamilyMembersEditList();
+        }
+
+        function saveFamilyMembersEdit() {
+            if(!editingFamilyId) return;
+
+            state.sims.forEach(sim => {
+                if(!sim.familyIds) sim.familyIds = [];
+                const isMemberNow = editingFamilySimIds.has(sim.id);
+                const isMemberBefore = sim.familyIds.includes(editingFamilyId);
+
+                if(isMemberNow && !isMemberBefore) {
+                    sim.familyIds.push(editingFamilyId);
+                } else if(!isMemberNow && isMemberBefore) {
+                    sim.familyIds = sim.familyIds.filter(id => id !== editingFamilyId);
+                }
+            });
+
+            saveData();
+            editingFamilyId = null;
+            editingFamilySimIds.clear();
+            document.getElementById('families-edit-container').style.display = 'none';
+            renderFamilies();
+            alert("Zmeny v rodine boli úspešne uložené.");
+        }
+
+        function cancelFamilyMembersEdit() {
+            editingFamilyId = null;
+            editingFamilySimIds.clear();
+            document.getElementById('families-edit-container').style.display = 'none';
+        }
+
         function renderFamilies() {
             const list = document.getElementById('families-list');
             list.innerHTML = '';
@@ -883,17 +1050,36 @@
                 membersDiv.style.width = '100%';
                 
                 const mems = state.sims.filter(s => s.familyIds && s.familyIds.includes(f.id));
-                mems.forEach(m => {
+                if(mems.length === 0) {
                     const p = document.createElement('div');
-                    p.innerHTML = `• <b>${m.name}</b> (${m.city})`;
-                    p.style.cursor = 'pointer';
+                    p.innerHTML = '<i>Rodina nemá žiadnych členov.</i>';
+                    p.style.color = '#6c757d';
                     p.style.padding = '5px 0';
-                    p.onclick = (e) => {
-                        e.stopPropagation(); // Zabrániť zavretiu rozbalovacieho menu
-                        renderSimProfile(m.id);
-                    };
                     membersDiv.appendChild(p);
-                });
+                } else {
+                    mems.forEach(m => {
+                        const p = document.createElement('div');
+                        p.innerHTML = `• <b>${m.name}</b> (${m.city})`;
+                        p.style.cursor = 'pointer';
+                        p.style.padding = '5px 0';
+                        p.onclick = (e) => {
+                            e.stopPropagation(); // Zabrániť zavretiu rozbalovacieho menu
+                            renderSimProfile(m.id);
+                        };
+                        membersDiv.appendChild(p);
+                    });
+                }
+
+                // Tlačidlo na správu členov
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn-secondary btn-small';
+                editBtn.style.marginTop = '10px';
+                editBtn.innerText = '⚙️ Spravovať členov rodiny';
+                editBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openFamilyMembersEdit(f.id);
+                };
+                membersDiv.appendChild(editBtn);
 
                 div.style.flexDirection = 'column';
                 div.style.alignItems = 'flex-start';
@@ -902,6 +1088,7 @@
                 header.style.display = 'flex';
                 header.style.width = '100%';
                 header.style.justifyContent = 'space-between';
+                header.style.alignItems = 'center';
                 header.innerHTML = `
                     <div class="list-item-content">
                         <div class="list-item-title">${f.name}</div>
