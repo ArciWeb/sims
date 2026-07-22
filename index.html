@@ -48,7 +48,7 @@
         .list-item-content { flex: 1; }
         .list-item-title { font-weight: bold; font-size: 1.1rem; margin-bottom: 4px; }
         .list-item-subtitle { font-size: 0.9rem; color: #6c757d; }
-        .list-item-actions { display: flex; gap: 5px; }
+        .list-item-actions { display: flex; gap: 5px; align-items: center; }
 
         /* Building & Apartment grouping */
         .building-group { background: var(--building-bg); border-radius: 8px; margin-bottom: 15px; overflow: hidden; border: 1px solid #ced4da; }
@@ -61,6 +61,29 @@
         .apt-sim { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: grab; background: white; }
         .apt-sim:last-child { border-bottom: none; }
 
+        /* Status circle button */
+        .status-circle {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid #adb5bd;
+            background-color: transparent;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+            padding: 0;
+            margin: 0;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        .status-circle.active {
+            background-color: var(--primary);
+            border-color: var(--primary);
+        }
+
         /* Checkboxes */
         .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: var(--surface); padding: 10px; border-radius: 6px; border: 1px solid var(--border); }
         .checkbox-group input { width: 20px; height: 20px; margin: 0; }
@@ -70,7 +93,7 @@
         .family-selector button.active { background: var(--primary); color: white; }
 
         .search-highlight { background-color: #ffe066; font-weight: bold; }
-        .empty-state { text-align: center; color: #6c757d; margin-top: 40px; font-style: italic; }
+        .empty-state { text-align: center; color: #6c757d; margin-top: 20px; font-style: italic; }
 
         .form-section { background: var(--surface); padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .form-section h3 { margin-bottom: 15px; font-size: 1.1rem; color: var(--secondary); border-bottom: 2px solid var(--border); padding-bottom: 5px; }
@@ -89,6 +112,9 @@
         .family-edit-city-header { background: var(--building-bg); padding: 8px 12px; font-weight: bold; font-size: 0.95rem; border-bottom: 1px solid var(--border); }
         .family-edit-sim-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-bottom: 1px solid #f0f0f0; }
         .family-edit-sim-item:last-child { border-bottom: none; }
+
+        /* Form pre priradenie bytov/podnikov */
+        .add-property-box { display: none; background: #eef2f5; padding: 12px; border-radius: 8px; margin-top: 10px; border: 1px solid var(--border); }
     </style>
 </head>
 <body>
@@ -108,6 +134,22 @@
     <!-- 2. SIMÍCI V MESTE -->
     <div id="view-city-sims" class="container">
         <button class="btn-primary" onclick="showEditSim(null, currentCity)">+ Pridať nového simíka</button>
+        
+        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+            <button class="btn-secondary btn-small" style="flex:1;" onclick="toggleAddPropertyBox('apt')">+ Voľný byt</button>
+            <button class="btn-secondary btn-small" style="flex:1;" onclick="toggleAddPropertyBox('biz')">+ Podnik</button>
+        </div>
+
+        <div id="add-property-box" class="add-property-box">
+            <h4 id="add-property-title" style="margin-bottom: 10px; font-size: 0.95rem; color: var(--secondary);">Pridať</h4>
+            <input type="text" id="prop-title-input" placeholder="Názov podniku" style="display: none; margin-bottom: 8px;">
+            <input type="text" id="prop-address-input" placeholder="Adresa (napr. Hlinská 37)" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-primary btn-small" onclick="saveNewProperty()">Uložiť</button>
+                <button class="btn-danger btn-small" onclick="toggleAddPropertyBox(null)">Zrušiť</button>
+            </div>
+        </div>
+
         <div id="city-sims-list" style="margin-top: 15px;"></div>
     </div>
 
@@ -125,12 +167,24 @@
             <h3 id="families-edit-title">Úprava členov rodiny</h3>
             <div id="families-edit-members-list"></div>
             <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <button class="btn-primary" onclick="saveFamilyMembersEdit()"> Potvrdiť a uložiť zmeny</button>
+                <button class="btn-primary" onclick="saveFamilyMembersEdit()">Potvrdiť a uložiť zmeny</button>
                 <button class="btn-danger" onclick="cancelFamilyMembersEdit()">Zrušiť</button>
             </div>
         </div>
 
         <div id="families-list"></div>
+
+        <!-- Zoznam voľných bytov -->
+        <div class="form-section" style="margin-top: 25px;">
+            <h3>🏢 Zoznam voľných bytov</h3>
+            <div id="vacant-apartments-list"></div>
+        </div>
+
+        <!-- Zoznam podnikov -->
+        <div class="form-section">
+            <h3>💼 Zoznam podnikov</h3>
+            <div id="businesses-list"></div>
+        </div>
     </div>
 
     <!-- 4. HĽADAŤ -->
@@ -246,10 +300,14 @@
         ];
 
         let state = {
-            sims: [],       // { id, name, city, address, familyIds: [] }
+            sims: [],       // { id, name, city, address, familyIds: [], status: false }
             families: [],   // { id, name }
-            cities: [...initialCities]
+            cities: [...initialCities],
+            properties: []  // { id, city, type: 'apt'|'biz', name: '', address: '' }
         };
+
+        // Pomocný stav pre pridávanie nehnuteľnosti
+        let currentPropertyType = null;
 
         // --- NAVIGATION STATE ---
         let currentView = 'cities';
@@ -293,13 +351,14 @@
                     state.sims = parsed.sims || [];
                     state.families = parsed.families || [];
                     state.cities = parsed.cities && parsed.cities.length > 0 ? parsed.cities : [...initialCities];
+                    state.properties = parsed.properties || [];
                 } catch(e) { console.error("Chyba pri načítaní dát."); }
             }
         }
 
         function clearAllData() {
             if(confirm("Naozaj chcete vymazať všetky údaje? Táto akcia je nevratná!")) {
-                state = { sims: [], families: [], cities: [...initialCities] };
+                state = { sims: [], families: [], cities: [...initialCities], properties: [] };
                 saveData();
                 populateCitySelect();
                 renderCities();
@@ -460,6 +519,13 @@
                 }
             });
 
+            // Aktualizácia miest pri nehnuteľnostiach
+            if(state.properties) {
+                state.properties.forEach(p => {
+                    if(p.city === oldName) p.city = trimmedNewName;
+                });
+            }
+
             saveData();
             populateCitySelect();
             if(currentCity === oldName) currentCity = trimmedNewName;
@@ -540,9 +606,7 @@
                         <div class="list-item-subtitle">Obyvateľov: ${count}</div>
                     </div>
                     <div class="list-item-actions" style="align-items: center;">
-                        <button class="btn-secondary btn-small" onclick="event.stopPropagation(); editCity('${city.replace(/'/g, "\\'")}')">✏️</button>
-                        <button class="btn-danger btn-small" onclick="event.stopPropagation(); deleteCity('${city.replace(/'/g, "\\'")}')">🗑️</button>
-                        <span style="margin-left: 10px; cursor: pointer;" onclick="renderCitySims('${city.replace(/'/g, "\\'")}')">➔</span>
+                        <span style="margin-left: 10px; cursor: pointer; font-size: 1.2rem; color: #6c757d;" onclick="renderCitySims('${city.replace(/'/g, "\\'")}')">➔</span>
                     </div>
                 `;
                 list.appendChild(div);
@@ -563,10 +627,92 @@
             });
         }
 
+        // VOĽNÉ BYTY A PODNIKY - LOGIKA
+        function toggleAddPropertyBox(type) {
+            const box = document.getElementById('add-property-box');
+            const titleInp = document.getElementById('prop-title-input');
+            const addrInp = document.getElementById('prop-address-input');
+            const titleHeader = document.getElementById('add-property-title');
+
+            if(!type) {
+                box.style.display = 'none';
+                currentPropertyType = null;
+                return;
+            }
+
+            currentPropertyType = type;
+            box.style.display = 'block';
+            addrInp.value = '';
+            titleInp.value = '';
+
+            if(type === 'apt') {
+                titleHeader.innerText = 'Pridať voľný byt';
+                titleInp.style.display = 'none';
+            } else {
+                titleHeader.innerText = 'Pridať podnik';
+                titleInp.style.display = 'block';
+            }
+        }
+
+        function saveNewProperty() {
+            if(!currentPropertyType || !currentCity) return;
+            
+            const titleInp = document.getElementById('prop-title-input');
+            const addrInp = document.getElementById('prop-address-input');
+
+            const name = titleInp.value.trim();
+            const address = addrInp.value.trim();
+
+            if(currentPropertyType === 'biz' && !name) {
+                alert("Zadajte názov podniku.");
+                return;
+            }
+            if(!address) {
+                alert("Zadajte adresu.");
+                return;
+            }
+
+            if(!state.properties) state.properties = [];
+
+            state.properties.push({
+                id: generateId(),
+                city: currentCity,
+                type: currentPropertyType,
+                name: currentPropertyType === 'biz' ? name : '',
+                address: address
+            });
+
+            saveData();
+            toggleAddPropertyBox(null);
+            renderCitySims(currentCity, false);
+            alert(currentPropertyType === 'apt' ? "Voľný byt bol pridaný." : "Podnik bol pridaný.");
+        }
+
+        function deleteProperty(id) {
+            if(confirm("Naozaj chcete vymazať túto položku?")) {
+                state.properties = state.properties.filter(p => p.id !== id);
+                saveData();
+                if(currentView === 'city-sims') renderCitySims(currentCity, false);
+                if(currentView === 'families') renderFamilies();
+            }
+        }
+
+        // Prepínanie zeleného kolesa (Status)
+        function toggleSimStatus(simId) {
+            const sim = state.sims.find(s => s.id === simId);
+            if(sim) {
+                sim.status = !sim.status;
+                saveData();
+                if(currentCity) renderCitySims(currentCity, false);
+            }
+        }
+
         // 2. Simíci v meste (Zoskupovanie podľa adries)
         function renderCitySims(city, addToHistory = true) {
             currentCity = city;
             showView('city-sims', `Obyvatelia: ${city}`, addToHistory);
+            toggleAddPropertyBox(null); // schovať formulár
+            
             const list = document.getElementById('city-sims-list');
             list.innerHTML = '';
 
@@ -617,9 +763,16 @@
                         const sDiv = document.createElement('div');
                         sDiv.className = 'apt-sim';
                         sDiv.dataset.simId = sim.id;
+                        
+                        const isChecked = sim.status ? 'active' : '';
+                        const checkMark = sim.status ? '✓' : '';
+
                         sDiv.innerHTML = `
                             <span style="font-weight:bold; cursor:pointer;" onclick="renderSimProfile('${sim.id}')">${sim.name}</span>
-                            <button class="btn-secondary btn-small" onclick="editCurrentSim('${sim.id}')">Upraviť</button>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button class="status-circle ${isChecked}" onclick="toggleSimStatus('${sim.id}')">${checkMark}</button>
+                                <button class="btn-secondary btn-small" onclick="editCurrentSim('${sim.id}')">Upraviť</button>
+                            </div>
                         `;
                         simsContainer.appendChild(sDiv);
                     });
@@ -895,7 +1048,8 @@
                     name: name,
                     city: city,
                     address: address,
-                    familyIds: selectedFamilyIds
+                    familyIds: selectedFamilyIds,
+                    status: false
                 };
                 state.sims.push(newSim);
                 currentSimId = newSim.id;
@@ -907,7 +1061,7 @@
             renderSimProfile(currentSimId, false);
         }
 
-        // 5. Rodiny zoznam & Úprava rodín
+        // 5. Rodiny zoznam & Úprava rodín & Byty & Podniky
         function createNewFamilyFromTab() {
             const input = document.getElementById('view-families-new-name');
             const name = input.value.trim();
@@ -1033,79 +1187,132 @@
             
             if(state.families.length === 0) {
                 list.innerHTML = '<div class="empty-state">Zatiaľ neboli vytvorené žiadne rodiny.</div>';
+            } else {
+                state.families.forEach(f => {
+                    const membersCount = state.sims.filter(s => s.familyIds && s.familyIds.includes(f.id)).length;
+                    
+                    const div = document.createElement('div');
+                    div.className = 'list-item';
+                    
+                    const membersDiv = document.createElement('div');
+                    membersDiv.style.display = 'none';
+                    membersDiv.style.marginTop = '10px';
+                    membersDiv.style.borderTop = '1px solid var(--border)';
+                    membersDiv.style.paddingTop = '10px';
+                    membersDiv.style.width = '100%';
+                    
+                    const mems = state.sims.filter(s => s.familyIds && s.familyIds.includes(f.id));
+                    if(mems.length === 0) {
+                        const p = document.createElement('div');
+                        p.innerHTML = '<i>Rodina nemá žiadnych členov.</i>';
+                        p.style.color = '#6c757d';
+                        p.style.padding = '5px 0';
+                        membersDiv.appendChild(p);
+                    } else {
+                        mems.forEach(m => {
+                            const p = document.createElement('div');
+                            p.innerHTML = `• <b>${m.name}</b> (${m.city})`;
+                            p.style.cursor = 'pointer';
+                            p.style.padding = '5px 0';
+                            p.onclick = (e) => {
+                                e.stopPropagation(); // Zabrániť zavretiu rozbalovacieho menu
+                                renderSimProfile(m.id);
+                            };
+                            membersDiv.appendChild(p);
+                        });
+                    }
+
+                    // Tlačidlo na správu členov
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'btn-secondary btn-small';
+                    editBtn.style.marginTop = '10px';
+                    editBtn.innerText = '⚙️ Spravovať členov rodiny';
+                    editBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        openFamilyMembersEdit(f.id);
+                    };
+                    membersDiv.appendChild(editBtn);
+
+                    div.style.flexDirection = 'column';
+                    div.style.alignItems = 'flex-start';
+                    
+                    const header = document.createElement('div');
+                    header.style.display = 'flex';
+                    header.style.width = '100%';
+                    header.style.justifyContent = 'space-between';
+                    header.style.alignItems = 'center';
+                    header.innerHTML = `
+                        <div class="list-item-content">
+                            <div class="list-item-title">${f.name}</div>
+                            <div class="list-item-subtitle">Členov: ${membersCount}</div>
+                        </div>
+                        <div>▼</div>
+                    `;
+                    
+                    div.innerHTML = '';
+                    div.appendChild(header);
+                    div.appendChild(membersDiv);
+
+                    div.onclick = () => {
+                        membersDiv.style.display = membersDiv.style.display === 'none' ? 'block' : 'none';
+                        header.querySelector('div:last-child').innerText = membersDiv.style.display === 'none' ? '▼' : '▲';
+                    };
+                    
+                    list.appendChild(div);
+                });
+            }
+
+            // Vykresliť Voľné byty a Podniky v sekcii Rodiny
+            renderVacantApartments();
+            renderBusinesses();
+        }
+
+        function renderVacantApartments() {
+            const list = document.getElementById('vacant-apartments-list');
+            list.innerHTML = '';
+
+            const vacantApts = (state.properties || []).filter(p => p.type === 'apt');
+            if(vacantApts.length === 0) {
+                list.innerHTML = '<div class="empty-state" style="margin-top: 5px;">Žiadne voľné byty.</div>';
                 return;
             }
 
-            state.families.forEach(f => {
-                const membersCount = state.sims.filter(s => s.familyIds && s.familyIds.includes(f.id)).length;
-                
+            vacantApts.forEach(apt => {
                 const div = document.createElement('div');
                 div.className = 'list-item';
-                
-                const membersDiv = document.createElement('div');
-                membersDiv.style.display = 'none';
-                membersDiv.style.marginTop = '10px';
-                membersDiv.style.borderTop = '1px solid var(--border)';
-                membersDiv.style.paddingTop = '10px';
-                membersDiv.style.width = '100%';
-                
-                const mems = state.sims.filter(s => s.familyIds && s.familyIds.includes(f.id));
-                if(mems.length === 0) {
-                    const p = document.createElement('div');
-                    p.innerHTML = '<i>Rodina nemá žiadnych členov.</i>';
-                    p.style.color = '#6c757d';
-                    p.style.padding = '5px 0';
-                    membersDiv.appendChild(p);
-                } else {
-                    mems.forEach(m => {
-                        const p = document.createElement('div');
-                        p.innerHTML = `• <b>${m.name}</b> (${m.city})`;
-                        p.style.cursor = 'pointer';
-                        p.style.padding = '5px 0';
-                        p.onclick = (e) => {
-                            e.stopPropagation(); // Zabrániť zavretiu rozbalovacieho menu
-                            renderSimProfile(m.id);
-                        };
-                        membersDiv.appendChild(p);
-                    });
-                }
-
-                // Tlačidlo na správu členov
-                const editBtn = document.createElement('button');
-                editBtn.className = 'btn-secondary btn-small';
-                editBtn.style.marginTop = '10px';
-                editBtn.innerText = '⚙️ Spravovať členov rodiny';
-                editBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    openFamilyMembersEdit(f.id);
-                };
-                membersDiv.appendChild(editBtn);
-
-                div.style.flexDirection = 'column';
-                div.style.alignItems = 'flex-start';
-                
-                const header = document.createElement('div');
-                header.style.display = 'flex';
-                header.style.width = '100%';
-                header.style.justifyContent = 'space-between';
-                header.style.alignItems = 'center';
-                header.innerHTML = `
+                div.style.padding = '10px 15px';
+                div.innerHTML = `
                     <div class="list-item-content">
-                        <div class="list-item-title">${f.name}</div>
-                        <div class="list-item-subtitle">Členov: ${membersCount}</div>
+                        <div class="list-item-title" style="font-size: 1rem;">🚪 ${apt.address}</div>
+                        <div class="list-item-subtitle">Mesto: ${apt.city}</div>
                     </div>
-                    <div>▼</div>
+                    <button class="btn-danger btn-small" onclick="deleteProperty('${apt.id}')">🗑️</button>
                 `;
-                
-                div.innerHTML = '';
-                div.appendChild(header);
-                div.appendChild(membersDiv);
+                list.appendChild(div);
+            });
+        }
 
-                div.onclick = () => {
-                    membersDiv.style.display = membersDiv.style.display === 'none' ? 'block' : 'none';
-                    header.querySelector('div:last-child').innerText = membersDiv.style.display === 'none' ? '▼' : '▲';
-                };
-                
+        function renderBusinesses() {
+            const list = document.getElementById('businesses-list');
+            list.innerHTML = '';
+
+            const bizs = (state.properties || []).filter(p => p.type === 'biz');
+            if(bizs.length === 0) {
+                list.innerHTML = '<div class="empty-state" style="margin-top: 5px;">Žiadne podniky.</div>';
+                return;
+            }
+
+            bizs.forEach(b => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.style.padding = '10px 15px';
+                div.innerHTML = `
+                    <div class="list-item-content">
+                        <div class="list-item-title" style="font-size: 1rem;">💼 ${b.name}</div>
+                        <div class="list-item-subtitle">${b.address}, ${b.city}</div>
+                    </div>
+                    <button class="btn-danger btn-small" onclick="deleteProperty('${b.id}')">🗑️</button>
+                `;
                 list.appendChild(div);
             });
         }
@@ -1166,6 +1373,7 @@
                     const parsed = JSON.parse(e.target.result);
                     if(parsed.sims && Array.isArray(parsed.sims)) {
                         state = parsed;
+                        if(!state.properties) state.properties = [];
                         saveData();
                         populateCitySelect();
                         alert("Dáta boli úspešne načítané zo súboru JSON.");
@@ -1211,7 +1419,8 @@
                             name: str,
                             city: currentParseCity,
                             address: '',
-                            familyIds: []
+                            familyIds: [],
+                            status: false
                         });
                         addedCount++;
                     }
