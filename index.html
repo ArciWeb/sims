@@ -52,11 +52,13 @@
 
         /* Building & Apartment grouping */
         .building-group { background: var(--building-bg); border-radius: 8px; margin-bottom: 15px; overflow: hidden; border: 1px solid #ced4da; }
-        .building-header { background: #ced4da; padding: 10px 15px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 8px; cursor: grab; }
+        /* Farebne výraznejší hlavičkový rámček pre hlavnú adresu */
+        .building-header { background: var(--primary); padding: 12px 15px; font-weight: bold; color: white; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .building-header::before { content: "🏠"; }
         
         .apt-group { margin: 10px; background: var(--surface); border-radius: 6px; border: 1px solid var(--border); }
-        .apt-header { padding: 8px 12px; background: var(--apt-bg); font-size: 0.9rem; font-weight: bold; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+        /* Písmo v pod-adrese je menšie a čisté bez nápisu Byt/Jednotka */
+        .apt-header { padding: 6px 12px; background: var(--apt-bg); font-size: 0.82rem; font-weight: 600; color: #495057; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
         .apt-header::before { content: "🚪"; font-size: 0.8rem; }
         .apt-sim { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: grab; background: white; }
         .apt-sim:last-child { border-bottom: none; }
@@ -107,9 +109,9 @@
         .collapsible-content { display: none; margin-top: 15px; }
         .collapsible-content.open { display: block; }
 
-        /* Štýl pre úpravu členov rodiny */
+        /* Štýl pre úpravu členov rodiny a multypresun */
         .family-edit-city-group { margin-bottom: 15px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-        .family-edit-city-header { background: var(--building-bg); padding: 8px 12px; font-weight: bold; font-size: 0.95rem; border-bottom: 1px solid var(--border); }
+        .family-edit-city-header { background: var(--building-bg); padding: 8px 12px; font-weight: bold; font-size: 0.95rem; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
         .family-edit-sim-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-bottom: 1px solid #f0f0f0; }
         .family-edit-sim-item:last-child { border-bottom: none; }
 
@@ -195,6 +197,18 @@
 
     <!-- 5. NASTAVENIA -->
     <div id="view-settings" class="container">
+        <!-- NOVÁ FUNKCIA: MULTYPRESUNUTIE -->
+        <div class="form-section">
+            <h3 class="collapsible-header" onclick="toggleMultiMoveSection()">
+                <span>🚚 Hromadný presun simíkov</span>
+                <span id="multi-move-icon">▼</span>
+            </h3>
+            <div id="multi-move-content" class="collapsible-content">
+                <p style="font-size: 0.85rem; color: #555; margin-bottom: 12px;">Vyberte mesto, označte simíkov a zvoľte nové cieľové mesto, do ktorého ich chcete presunúť.</p>
+                <div id="multi-move-cities-container"></div>
+            </div>
+        </div>
+
         <div class="form-section">
             <h3 class="collapsible-header" onclick="toggleSettingsCities()">
                 <span>Správa miest</span>
@@ -321,6 +335,10 @@
         let editingFamilyId = null;
         let editingFamilySimIds = new Set();
 
+        // Pomocný stav pre Multypresun
+        let selectedMultiMoveSims = new Set();
+        let activeMultiMoveCity = null;
+
         // --- INICIALIZÁCIA ---
         function init() {
             loadData();
@@ -382,6 +400,63 @@
                 building: match[1] ? match[1].trim() : 'Bez adresy',
                 apt: match[2] ? match[2].trim() : ''
             };
+        }
+
+        // Pomocná funkcia pre číselný kľúč na zoradenie pod/adries
+        function naturalSortKey(str) {
+            if (!str) return [0, ''];
+            // Vytiahne číslá a prípadné číslá za lomenom
+            const match = str.match(/^(.*?)\s*(\d+)(?:\/(\d+))?$/);
+            if (match) {
+                const prefix = match[1].toLowerCase().trim();
+                const num1 = parseInt(match[2], 10);
+                const num2 = match[3] !== undefined ? parseInt(match[3], 10) : -1;
+                return [1, prefix, num1, num2];
+            }
+            return [0, str.toLowerCase()];
+        }
+
+        function compareAddresses(a, b) {
+            const keyA = naturalSortKey(a);
+            const keyB = naturalSortKey(b);
+
+            if (keyA[0] !== keyB[0]) return keyA[0] - keyB[0];
+            if (keyA[0] === 1) {
+                if (keyA[1] !== keyB[1]) return keyA[1].localeCompare(keyB[1]);
+                if (keyA[2] !== keyB[2]) return keyA[2] - keyB[2];
+                return keyA[3] - keyB[3];
+            }
+            return keyA[1].localeCompare(keyB[1]);
+        }
+
+        // Automatické vloženie novej/upravenej adresy na správne číslo
+        function autoInsertSimByAddress(targetSim) {
+            // Najprv vyberieme simíka zo zoznamu
+            state.sims = state.sims.filter(s => s.id !== targetSim.id);
+
+            const citySims = state.sims.filter(s => s.city === targetSim.city);
+            const otherSims = state.sims.filter(s => s.city !== targetSim.city);
+
+            if (citySims.length === 0) {
+                state.sims = [...otherSims, targetSim];
+                return;
+            }
+
+            // Nájsť pozíciu, kam simík zapadne na základe porovnania adries
+            let inserted = false;
+            for (let i = 0; i < citySims.length; i++) {
+                if (compareAddresses(targetSim.address, citySims[i].address) < 0) {
+                    citySims.splice(i, 0, targetSim);
+                    inserted = true;
+                    break;
+                }
+            }
+
+            if (!inserted) {
+                citySims.push(targetSim);
+            }
+
+            state.sims = [...otherSims, ...citySims];
         }
 
         // --- NAVIGÁCIA A UI LOGIKA ---
@@ -462,11 +537,12 @@
             }
             if(tabId === 'settings') { 
                 renderSettingsCities();
+                renderMultiMoveCities();
                 showView('settings', 'Nastavenia', false); 
             }
         }
 
-        // --- SPRÁVA MIEST ---
+        // --- SPRÁVA MIEST & MULTYPRESUN ---
         function toggleSettingsCities() {
             const content = document.getElementById('settings-cities-content');
             const icon = document.getElementById('settings-cities-icon');
@@ -476,6 +552,147 @@
             } else {
                 content.classList.add('open');
                 icon.innerText = '▲';
+            }
+        }
+
+        function toggleMultiMoveSection() {
+            const content = document.getElementById('multi-move-content');
+            const icon = document.getElementById('multi-move-icon');
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                icon.innerText = '▼';
+            } else {
+                content.classList.add('open');
+                icon.innerText = '▲';
+                renderMultiMoveCities();
+            }
+        }
+
+        function renderMultiMoveCities() {
+            const container = document.getElementById('multi-move-cities-container');
+            container.innerHTML = '';
+
+            if (state.cities.length === 0) {
+                container.innerHTML = '<div class="empty-state">Žiadne mestá k dispozícii.</div>';
+                return;
+            }
+
+            state.cities.forEach(cityName => {
+                const citySims = state.sims.filter(s => s.city === cityName);
+                
+                const group = document.createElement('div');
+                group.className = 'family-edit-city-group';
+
+                const header = document.createElement('div');
+                header.className = 'family-edit-city-header';
+                
+                const isOpen = activeMultiMoveCity === cityName;
+                header.innerHTML = `<span>🏙️ <b>${cityName}</b> (${citySims.length})</span><span>${isOpen ? '▲' : '▼'}</span>`;
+                
+                const simListDiv = document.createElement('div');
+                simListDiv.style.display = isOpen ? 'block' : 'none';
+
+                header.onclick = () => {
+                    activeMultiMoveCity = activeMultiMoveCity === cityName ? null : cityName;
+                    renderMultiMoveCities();
+                };
+
+                if (isOpen) {
+                    if (citySims.length === 0) {
+                        simListDiv.innerHTML = '<div style="padding: 10px; color: #6c757d; font-style: italic;">V tomto meste nie sú žiadni simíci.</div>';
+                    } else {
+                        citySims.forEach(sim => {
+                            const simRow = document.createElement('div');
+                            simRow.className = 'family-edit-sim-item';
+                            
+                            const isSelected = selectedMultiMoveSims.has(sim.id);
+                            
+                            simRow.innerHTML = `
+                                <div>
+                                    <input type="checkbox" id="mm_cb_${sim.id}" ${isSelected ? 'checked' : ''} style="width: auto; margin-right: 8px;">
+                                    <label for="mm_cb_${sim.id}" style="cursor: pointer;"><b>${sim.name}</b> <small style="color: #6c757d;">(${sim.address || 'Bez adresy'})</small></label>
+                                </div>
+                            `;
+
+                            const cb = simRow.querySelector('input');
+                            cb.onchange = (e) => {
+                                if (e.target.checked) {
+                                    selectedMultiMoveSims.add(sim.id);
+                                } else {
+                                    selectedMultiMoveSims.delete(sim.id);
+                                }
+                                updateMultiMoveActionBar(group, cityName);
+                            };
+
+                            simListDiv.appendChild(simRow);
+                        });
+
+                        // Rámček s výberom nového mesta
+                        const moveBar = document.createElement('div');
+                        moveBar.id = `mm_action_bar_${cityName}`;
+                        moveBar.style.padding = '10px';
+                        moveBar.style.background = '#eef2f5';
+                        moveBar.style.borderTop = '1px solid var(--border)';
+                        
+                        let selectOptions = state.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+
+                        moveBar.innerHTML = `
+                            <div style="font-weight: bold; font-size: 0.9rem; margin-bottom: 5px;">Presunúť označených simíkov (${selectedMultiMoveSims.size}):</div>
+                            <select id="mm_target_city_${cityName}" style="margin-bottom: 8px;">
+                                <option value="">-- Vyberte cieľové mesto --</option>
+                                ${selectOptions}
+                            </select>
+                            <button class="btn-primary btn-small" style="width: 100%;" onclick="executeMultiMove('${cityName}')">Potvrdiť presun</button>
+                        `;
+
+                        simListDiv.appendChild(moveBar);
+                    }
+                }
+
+                group.appendChild(header);
+                group.appendChild(simListDiv);
+                container.appendChild(group);
+            });
+        }
+
+        function updateMultiMoveActionBar(groupElement, cityName) {
+            const bar = groupElement.querySelector(`#mm_action_bar_${cityName}`);
+            if (bar) {
+                const label = bar.querySelector('div');
+                if (label) {
+                    label.innerText = `Presunúť označených simíkov (${selectedMultiMoveSims.size}):`;
+                }
+            }
+        }
+
+        function executeMultiMove(fromCity) {
+            if (selectedMultiMoveSims.size === 0) {
+                alert("Vyberte aspoň jedného simíka na presun.");
+                return;
+            }
+
+            const targetSelect = document.getElementById(`mm_target_city_${fromCity}`);
+            const targetCity = targetSelect.value;
+
+            if (!targetCity) {
+                alert("Zvoľte nové cieľové mesto.");
+                return;
+            }
+
+            if (confirm(`Naozaj chcete presunúť ${selectedMultiMoveSims.size} simíkov do mesta "${targetCity}"?`)) {
+                let movedCount = 0;
+                state.sims.forEach(sim => {
+                    if (selectedMultiMoveSims.has(sim.id)) {
+                        sim.city = targetCity;
+                        movedCount++;
+                    }
+                });
+
+                saveData();
+                selectedMultiMoveSims.clear();
+                alert(`Úspešne presunutých ${movedCount} simíkov do mesta "${targetCity}".`);
+                renderMultiMoveCities();
+                renderCities();
             }
         }
 
@@ -707,7 +924,7 @@
             }
         }
 
-        // 2. Simíci v meste (Zoskupovanie podľa adries)
+        // 2. Simíci v meste (Zoskupovanie podľa adriés)
         function renderCitySims(city, addToHistory = true) {
             currentCity = city;
             showView('city-sims', `Obyvatelia: ${city}`, addToHistory);
@@ -722,7 +939,7 @@
                 return;
             }
 
-            // Zoskupovanie: building -> apt -> [sims] (zachováva prirodzené poradie v poli state.sims)
+            // Zoskupovanie: building -> apt -> [sims] (zachováva poradie v poli state.sims)
             const groups = {};
             citySims.forEach(sim => {
                 const parsed = parseAddress(sim.address);
@@ -740,6 +957,7 @@
                 bDiv.className = 'building-group';
                 bDiv.dataset.buildingName = building;
                 
+                // Výraznejšia hlavička s domčekom
                 const bHeader = document.createElement('div');
                 bHeader.className = 'building-header';
                 bHeader.innerText = building;
@@ -752,7 +970,8 @@
                     if(apt !== 'MAIN') {
                         const aHeader = document.createElement('div');
                         aHeader.className = 'apt-header';
-                        aHeader.innerText = `Byt / Jednotka: ${apt}`;
+                        // Zobrazenie celej adresy menším písom namiesto "Byt / Jednotka:"
+                        aHeader.innerText = `${building}/${apt}`;
                         aDiv.appendChild(aHeader);
                     }
 
@@ -828,7 +1047,7 @@
                 }
             });
 
-            // Pridanie prípadných zvyškoch
+            // Pridanie prípadných zvyškov
             currentCitySimsMap.forEach(sim => reorderedCitySims.push(sim));
 
             state.sims = [...otherCitySims, ...reorderedCitySims];
@@ -844,7 +1063,7 @@
             showView('sim-profile', sim.name, addToHistory);
             
             document.getElementById('profile-name').innerText = sim.name;
-            const fullAddress = sim.address ? `${sim.address}, ${sim.city}` : `${sim.city} (Bez adries)`;
+            const fullAddress = sim.address ? `${sim.address}, ${sim.city}` : `${sim.city} (Bez adresy)`;
             document.getElementById('profile-location').innerText = fullAddress;
 
             const selector = document.getElementById('profile-family-selector');
@@ -1034,16 +1253,17 @@
             // Získať zvolené rodiny
             const selectedFamilyIds = Array.from(document.querySelectorAll('#edit-sim-families-list input[type="checkbox"]:checked')).map(cb => cb.value);
 
+            let simToSave;
             if(currentSimId && state.sims.some(s => s.id === currentSimId)) {
                 // Update
-                const sim = state.sims.find(s => s.id === currentSimId);
-                sim.name = name;
-                sim.city = city;
-                sim.address = address;
-                sim.familyIds = selectedFamilyIds;
+                simToSave = state.sims.find(s => s.id === currentSimId);
+                simToSave.name = name;
+                simToSave.city = city;
+                simToSave.address = address;
+                simToSave.familyIds = selectedFamilyIds;
             } else {
                 // Create
-                const newSim = {
+                simToSave = {
                     id: generateId(),
                     name: name,
                     city: city,
@@ -1051,9 +1271,11 @@
                     familyIds: selectedFamilyIds,
                     status: false
                 };
-                state.sims.push(newSim);
-                currentSimId = newSim.id;
+                currentSimId = simToSave.id;
             }
+
+            // Automatické zaradenie podľa čísla do zoznamu adries
+            autoInsertSimByAddress(simToSave);
 
             saveData();
             
